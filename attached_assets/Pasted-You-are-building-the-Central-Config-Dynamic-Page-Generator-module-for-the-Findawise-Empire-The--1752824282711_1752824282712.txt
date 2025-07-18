@@ -1,0 +1,72 @@
+You are building the “Central Config + Dynamic Page Generator” module for the Findawise Empire.
+The goal: Create a framework-independent, modular codebase that generates every page dynamically from a central config file (JSON or TS), with full support for niche, emotion-based theming, and pluggable interactive modules (quiz, calculator, comparison, etc.).
+
+Follow these steps:
+
+Create config/pages.json
+
+For each page, include:
+
+slug
+
+title
+
+description
+
+niche
+
+emotion (e.g. "trust", "excitement", "relief")
+
+interactiveModule (e.g. "quiz", "calculator", "comparison")
+
+contentPointer (relative file path for content)
+
+cta (text, link)
+
+Provide 3-5 real example pages across different niches and emotions.
+
+Write the Dynamic Page Generator:
+
+Use /pages/[slug].tsx (for React/Next) or /src/pages/[slug].js (for JS/TS).
+
+It must:
+
+Read the config file
+
+On each route, render the correct page (title, meta, emotion/theme, content)
+
+Load the correct interactive module dynamically by config (use simple placeholders if actual modules aren't coded yet)
+
+Display the CTA button and inject the content from the pointer
+
+All theming logic for emotion (background, accent colors) should be handled via a simple EmotionMap object in code.
+
+Code must be clean, commented, and exportable.
+
+Documentation:
+
+Output a clear README.md (Hindi/English mix is fine) explaining:
+
+What is built
+
+How to add new pages/niches
+
+How to plug in additional modules (e.g., quiz engine, calculator)
+
+How to export/import this module to the next Replit instance
+
+Don’t compress, minimize, or skip logic to save tokens. Output the best code you can, up to token limit.
+
+If you hit a token or output limit, just explain what’s done and what’s left for the next Replit.
+
+Important notes:
+
+This module is the brainstem. Every future module (Quiz, Calculator, Affiliate, Blog, EmotionMap, etc.) will plug into this core generator.
+
+Har page config-driven hona chahiye, koi static nahi.
+
+Modular likh, export/import simple ho.
+
+Documentation clean ho, koi confusion nahi.
+
+This should feel like the foundation of a billion-dollar, self-evolving AI web empire.

@@ -1,0 +1,101 @@
+{
+  "pages": [
+    {
+      "slug": "fitness-transformation-quiz",
+      "title": "Transform Your Body in 90 Days",
+      "description": "Discover your personalized fitness journey with our science-backed quiz",
+      "niche": "fitness",
+      "emotion": "excitement",
+      "interactiveModule": "quiz",
+      "contentPointer": "content/fitness-transformation.md",
+      "cta": {
+        "text": "Start Your Transformation",
+        "link": "/signup"
+      },
+      "meta": {
+        "keywords": "fitness, transformation, workout, exercise, health",
+        "ogImage": "/images/fitness-transformation.jpg"
+      },
+      "affiliateOffers": [
+        { "slug": "premium-fitness-tracker", "position": "header", "priority": 1 },
+        { "slug": "transformation-program", "position": "sidebar", "priority": 1 }
+      ]
+    },
+    {
+      "slug": "investment-calculator",
+      "title": "Smart Investment Returns Calculator",
+      "description": "Calculate your potential returns with our advanced investment calculator",
+      "niche": "finance",
+      "emotion": "trust",
+      "interactiveModule": "calculator",
+      "contentPointer": "content/investment-guide.md",
+      "cta": {
+        "text": "Get Started with Investing",
+        "link": "/invest"
+      },
+      "meta": {
+        "keywords": "investment, calculator, returns, finance, money",
+        "ogImage": "/images/investment-calculator.jpg"
+      },
+      "affiliateOffers": [
+        { "slug": "investment-books-bundle", "position": "header", "priority": 1 },
+        { "slug": "trading-platform-pro", "position": "sidebar", "priority": 1 }
+      ]
+    },
+    {
+      "slug": "anxiety-relief-toolkit",
+      "title": "Instant Anxiety Relief Techniques",
+      "description": "Find peace with proven anxiety management strategies",
+      "niche": "mental-health",
+      "emotion": "relief",
+      "interactiveModule": "comparison",
+      "contentPointer": "content/anxiety-relief.md",
+      "cta": {
+        "text": "Access Relief Tools",
+        "link": "/tools"
+      },
+      "meta": {
+        "keywords": "anxiety, relief, mental health, stress, techniques",
+        "ogImage": "/images/anxiety-relief.jpg"
+      },
+      "affiliateOffers": [
+        { "slug": "anxiety-relief-supplements", "position": "header", "priority": 1 },
+        { "slug": "stress-management-course", "position": "sidebar", "priority": 1 }
+      ]
+    },
+    {
+      "slug": "meditation-timer",
+      "title": "Meditation Guide & Timer",
+      "description": "Develop mindfulness with guided meditation sessions",
+      "niche": "wellness",
+      "emotion": "calm",
+      "interactiveModule": "timer",
+      "contentPointer": "content/meditation-guide.md",
+      "cta": {
+        "text": "Start Meditation Journey",
+        "link": "/meditate"
+      },
+      "meta": {
+        "keywords": "meditation, mindfulness, timer, wellness, peace",
+        "ogImage": "/images/meditation-timer.jpg"
+      }
+    },
+    {
+      "slug": "business-success-strategies",
+      "title": "Proven Business Growth Strategies",
+      "description": "Scale your business with data-driven strategies that work",
+      "niche": "business",
+      "emotion": "confidence",
+      "interactiveModule": "comparison",
+      "contentPointer": "content/business-success.md",
+      "cta": {
+        "text": "Transform Your Business",
+        "link": "/business"
+      },
+      "meta": {
+        "keywords": "business, growth, strategies, success, entrepreneurship",
+        "ogImage": "/images/business-success.jpg"
+      }
+    }
+  ]
+}
