@@ -365,7 +365,7 @@ export function useLocalizationAnalytics() {
             eventType,
             languageCode: currentLanguage,
             ...data,
-            timestamp: new Date().toISOString(),
+            timestamp: new Date(),
           }),
         });
       } catch (error) {

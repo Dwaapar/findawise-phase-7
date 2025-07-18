@@ -60,20 +60,26 @@ const LocalizationDashboard = () => {
   const queryClient = useQueryClient();
 
   // Fetch languages
-  const { data: languages = [], isLoading: isLoadingLanguages } = useQuery({
+  const { data: languagesResponse, isLoading: isLoadingLanguages } = useQuery({
     queryKey: ['/api/languages'],
   });
+  
+  const languages = Array.isArray(languagesResponse?.data) ? languagesResponse.data : [];
 
   // Fetch translation keys
-  const { data: translationKeys = [], isLoading: isLoadingKeys } = useQuery({
+  const { data: keysResponse, isLoading: isLoadingKeys } = useQuery({
     queryKey: ['/api/translation-keys'],
   });
+  
+  const translationKeys = Array.isArray(keysResponse?.data) ? keysResponse.data : [];
 
   // Fetch translations for selected language
-  const { data: translations = [], isLoading: isLoadingTranslations } = useQuery({
+  const { data: translationsResponse, isLoading: isLoadingTranslations } = useQuery({
     queryKey: ['/api/translations', selectedLanguage],
     enabled: !!selectedLanguage,
   });
+  
+  const translations = Array.isArray(translationsResponse?.data) ? translationsResponse.data : [];
 
   // Fetch localization analytics
   const { data: analytics = [], isLoading: isLoadingAnalytics } = useQuery({
