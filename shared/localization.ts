@@ -132,6 +132,7 @@ export const insertLocalizedContentAssignmentSchema = createInsertSchema(localiz
 
 export const insertLocalizationAnalyticsSchema = createInsertSchema(localizationAnalytics).omit({
   id: true,
+  timestamp: true,
   createdAt: true,
 });
 

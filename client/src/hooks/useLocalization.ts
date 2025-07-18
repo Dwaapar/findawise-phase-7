@@ -365,7 +365,6 @@ export function useLocalizationAnalytics() {
             eventType,
             languageCode: currentLanguage,
             ...data,
-            timestamp: new Date(),
           }),
         });
       } catch (error) {
