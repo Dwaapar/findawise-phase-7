@@ -19,6 +19,12 @@ import {
   leadExperiments,
   leadActivities,
   emailCampaigns,
+  globalUserProfiles,
+  deviceFingerprints,
+  userProfileMergeHistory,
+  analyticsEvents,
+  sessionBridge,
+  analyticsSyncStatus,
   type User, 
   type InsertUser,
   type AffiliateNetwork,
@@ -58,10 +64,23 @@ import {
   type LeadActivity,
   type InsertLeadActivity,
   type EmailCampaign,
-  type InsertEmailCampaign
+  type InsertEmailCampaign,
+  type GlobalUserProfile,
+  type InsertGlobalUserProfile,
+  type DeviceFingerprint,
+  type InsertDeviceFingerprint,
+  type UserProfileMergeHistory,
+  type InsertUserProfileMergeHistory,
+  type AnalyticsEvent,
+  type InsertAnalyticsEvent,
+  type SessionBridge,
+  type InsertSessionBridge,
+  type AnalyticsSyncStatus,
+  type InsertAnalyticsSyncStatus
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, gte, lte, sql, count } from "drizzle-orm";
+import { randomUUID } from "crypto";
 
 export interface IStorage {
   // User operations
@@ -164,6 +183,86 @@ export interface IStorage {
   getLeadAnalytics(startDate?: Date, endDate?: Date): Promise<any>;
   getLeadConversionRates(): Promise<any>;
   getLeadFormPerformance(): Promise<any>;
+
+  // ===========================================
+  // CROSS-DEVICE USER PROFILES & ANALYTICS SYNC
+  // ===========================================
+
+  // Global User Profile operations
+  createGlobalUserProfile(profile: InsertGlobalUserProfile): Promise<GlobalUserProfile>;
+  getGlobalUserProfile(id: number): Promise<GlobalUserProfile | undefined>;
+  getGlobalUserProfileByUUID(uuid: string): Promise<GlobalUserProfile | undefined>;
+  getGlobalUserProfileByEmail(email: string): Promise<GlobalUserProfile | undefined>;
+  getGlobalUserProfileByPhone(phone: string): Promise<GlobalUserProfile | undefined>;
+  updateGlobalUserProfile(id: number, profile: Partial<InsertGlobalUserProfile>): Promise<GlobalUserProfile>;
+  getAllGlobalUserProfiles(limit?: number, offset?: number): Promise<GlobalUserProfile[]>;
+  searchGlobalUserProfiles(query: string): Promise<GlobalUserProfile[]>;
+  
+  // Device Fingerprint operations
+  createDeviceFingerprint(fingerprint: InsertDeviceFingerprint): Promise<DeviceFingerprint>;
+  getDeviceFingerprint(fingerprint: string): Promise<DeviceFingerprint | undefined>;
+  getDeviceFingerprintsByUser(globalUserId: number): Promise<DeviceFingerprint[]>;
+  updateDeviceFingerprint(id: number, fingerprint: Partial<InsertDeviceFingerprint>): Promise<DeviceFingerprint>;
+  
+  // User Profile Merge operations
+  mergeUserProfiles(masterProfileId: number, mergedProfileId: number, reason: string, confidence: number): Promise<void>;
+  getUserProfileMergeHistory(masterProfileId: number): Promise<UserProfileMergeHistory[]>;
+  
+  // Analytics Events operations
+  trackAnalyticsEvent(event: InsertAnalyticsEvent): Promise<AnalyticsEvent>;
+  trackAnalyticsEventBatch(events: InsertAnalyticsEvent[]): Promise<AnalyticsEvent[]>;
+  getAnalyticsEvents(filters?: {
+    sessionId?: string;
+    globalUserId?: number;
+    eventType?: string;
+    startDate?: Date;
+    endDate?: Date;
+    limit?: number;
+    offset?: number;
+  }): Promise<AnalyticsEvent[]>;
+  getAnalyticsEventsByUser(globalUserId: number, limit?: number): Promise<AnalyticsEvent[]>;
+  getAnalyticsEventsBySession(sessionId: string): Promise<AnalyticsEvent[]>;
+  processAnalyticsEvents(batchId: string): Promise<void>;
+  
+  // Session Bridge operations
+  createSessionBridge(bridge: InsertSessionBridge): Promise<SessionBridge>;
+  getSessionBridge(sessionId: string): Promise<SessionBridge | undefined>;
+  updateSessionBridge(id: number, bridge: Partial<InsertSessionBridge>): Promise<SessionBridge>;
+  linkSessionToGlobalUser(sessionId: string, globalUserId: number, method: string, confidence: number): Promise<void>;
+  
+  // Analytics Sync Status operations
+  createAnalyticsSyncStatus(status: InsertAnalyticsSyncStatus): Promise<AnalyticsSyncStatus>;
+  getAnalyticsSyncStatus(sessionId: string): Promise<AnalyticsSyncStatus | undefined>;
+  updateAnalyticsSyncStatus(id: number, status: Partial<InsertAnalyticsSyncStatus>): Promise<AnalyticsSyncStatus>;
+  
+  // Cross-device User Recognition
+  findUserByFingerprint(fingerprint: string): Promise<GlobalUserProfile | undefined>;
+  findUserByEmail(email: string, createIfNotExists?: boolean): Promise<GlobalUserProfile>;
+  findUserByPhone(phone: string, createIfNotExists?: boolean): Promise<GlobalUserProfile>;
+  identifyUser(sessionId: string, identifiers: {
+    email?: string;
+    phone?: string;
+    fingerprint?: string;
+    deviceInfo?: any;
+  }): Promise<GlobalUserProfile>;
+  
+  // Analytics Dashboard Data
+  getComprehensiveAnalytics(filters?: {
+    startDate?: Date;
+    endDate?: Date;
+    globalUserId?: number;
+    deviceType?: string;
+    eventType?: string;
+  }): Promise<any>;
+  getUserJourney(globalUserId: number): Promise<any>;
+  getCrossDeviceStats(): Promise<any>;
+  getEngagementMetrics(globalUserId?: number): Promise<any>;
+  getConversionFunnelData(funnelType?: string): Promise<any>;
+  
+  // Export/Import functionality
+  exportUserData(globalUserId: number): Promise<any>;
+  exportAnalyticsData(filters?: any): Promise<any>;
+  importAnalyticsData(data: any): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1018,6 +1117,626 @@ export class DatabaseStorage implements IStorage {
       unsubscribeRate: stat.totalCaptures > 0 ? (stat.unsubscribed / stat.totalCaptures * 100).toFixed(2) : '0',
       avgTimeToDeliveryHours: stat.avgTimeToDelivery ? (stat.avgTimeToDelivery / 3600).toFixed(2) : '0',
     }));
+  }
+
+  // ===========================================
+  // CROSS-DEVICE USER PROFILES & ANALYTICS SYNC
+  // ===========================================
+
+  // Global User Profile operations
+  async createGlobalUserProfile(profile: InsertGlobalUserProfile): Promise<GlobalUserProfile> {
+    const [newProfile] = await db.insert(globalUserProfiles).values(profile).returning();
+    return newProfile;
+  }
+
+  async getGlobalUserProfile(id: number): Promise<GlobalUserProfile | undefined> {
+    const [profile] = await db.select().from(globalUserProfiles).where(eq(globalUserProfiles.id, id));
+    return profile;
+  }
+
+  async getGlobalUserProfileByUUID(uuid: string): Promise<GlobalUserProfile | undefined> {
+    const [profile] = await db.select().from(globalUserProfiles).where(eq(globalUserProfiles.uuid, uuid));
+    return profile;
+  }
+
+  async getGlobalUserProfileByEmail(email: string): Promise<GlobalUserProfile | undefined> {
+    const [profile] = await db.select().from(globalUserProfiles).where(eq(globalUserProfiles.email, email));
+    return profile;
+  }
+
+  async getGlobalUserProfileByPhone(phone: string): Promise<GlobalUserProfile | undefined> {
+    const [profile] = await db.select().from(globalUserProfiles).where(eq(globalUserProfiles.phone, phone));
+    return profile;
+  }
+
+  async updateGlobalUserProfile(id: number, profile: Partial<InsertGlobalUserProfile>): Promise<GlobalUserProfile> {
+    const [updatedProfile] = await db
+      .update(globalUserProfiles)
+      .set({ ...profile, updatedAt: new Date() })
+      .where(eq(globalUserProfiles.id, id))
+      .returning();
+    return updatedProfile;
+  }
+
+  async getAllGlobalUserProfiles(limit: number = 100, offset: number = 0): Promise<GlobalUserProfile[]> {
+    return await db.select().from(globalUserProfiles)
+      .where(eq(globalUserProfiles.isActive, true))
+      .limit(limit)
+      .offset(offset)
+      .orderBy(desc(globalUserProfiles.createdAt));
+  }
+
+  async searchGlobalUserProfiles(query: string): Promise<GlobalUserProfile[]> {
+    return await db.select().from(globalUserProfiles)
+      .where(and(
+        eq(globalUserProfiles.isActive, true),
+        sql`(
+          ${globalUserProfiles.email} ILIKE ${`%${query}%`} OR
+          ${globalUserProfiles.firstName} ILIKE ${`%${query}%`} OR
+          ${globalUserProfiles.lastName} ILIKE ${`%${query}%`} OR
+          ${globalUserProfiles.phone} ILIKE ${`%${query}%`}
+        )`
+      ))
+      .limit(50);
+  }
+
+  // Device Fingerprint operations
+  async createDeviceFingerprint(fingerprint: InsertDeviceFingerprint): Promise<DeviceFingerprint> {
+    const [newFingerprint] = await db.insert(deviceFingerprints).values(fingerprint).returning();
+    return newFingerprint;
+  }
+
+  async getDeviceFingerprint(fingerprint: string): Promise<DeviceFingerprint | undefined> {
+    const [device] = await db.select().from(deviceFingerprints).where(eq(deviceFingerprints.fingerprint, fingerprint));
+    return device;
+  }
+
+  async getDeviceFingerprintsByUser(globalUserId: number): Promise<DeviceFingerprint[]> {
+    return await db.select().from(deviceFingerprints)
+      .where(and(
+        eq(deviceFingerprints.globalUserId, globalUserId),
+        eq(deviceFingerprints.isActive, true)
+      ))
+      .orderBy(desc(deviceFingerprints.lastSeen));
+  }
+
+  async updateDeviceFingerprint(id: number, fingerprint: Partial<InsertDeviceFingerprint>): Promise<DeviceFingerprint> {
+    const [updatedFingerprint] = await db
+      .update(deviceFingerprints)
+      .set({ ...fingerprint, updatedAt: new Date() })
+      .where(eq(deviceFingerprints.id, id))
+      .returning();
+    return updatedFingerprint;
+  }
+
+  // User Profile Merge operations
+  async mergeUserProfiles(masterProfileId: number, mergedProfileId: number, reason: string, confidence: number): Promise<void> {
+    // Get the profiles to merge
+    const masterProfile = await this.getGlobalUserProfile(masterProfileId);
+    const mergedProfile = await this.getGlobalUserProfile(mergedProfileId);
+    
+    if (!masterProfile || !mergedProfile) {
+      throw new Error('Profile not found for merging');
+    }
+
+    // Merge the data
+    const mergedData = {
+      totalSessions: (masterProfile.totalSessions || 0) + (mergedProfile.totalSessions || 0),
+      totalPageViews: (masterProfile.totalPageViews || 0) + (mergedProfile.totalPageViews || 0),
+      totalInteractions: (masterProfile.totalInteractions || 0) + (mergedProfile.totalInteractions || 0),
+      totalTimeOnSite: (masterProfile.totalTimeOnSite || 0) + (mergedProfile.totalTimeOnSite || 0),
+      conversionCount: (masterProfile.conversionCount || 0) + (mergedProfile.conversionCount || 0),
+      lifetimeValue: (masterProfile.lifetimeValue || 0) + (mergedProfile.lifetimeValue || 0),
+      firstVisit: masterProfile.firstVisit && mergedProfile.firstVisit ? 
+        (masterProfile.firstVisit < mergedProfile.firstVisit ? masterProfile.firstVisit : mergedProfile.firstVisit) : 
+        (masterProfile.firstVisit || mergedProfile.firstVisit),
+      lastVisit: masterProfile.lastVisit && mergedProfile.lastVisit ? 
+        (masterProfile.lastVisit > mergedProfile.lastVisit ? masterProfile.lastVisit : mergedProfile.lastVisit) : 
+        (masterProfile.lastVisit || mergedProfile.lastVisit),
+      mergedFromSessions: [
+        ...(masterProfile.mergedFromSessions as string[] || []),
+        ...(mergedProfile.mergedFromSessions as string[] || [])
+      ]
+    };
+
+    // Update master profile
+    await this.updateGlobalUserProfile(masterProfileId, mergedData);
+
+    // Update session bridges to point to master profile
+    await db
+      .update(sessionBridge)
+      .set({ globalUserId: masterProfileId })
+      .where(eq(sessionBridge.globalUserId, mergedProfileId));
+
+    // Update device fingerprints to point to master profile
+    await db
+      .update(deviceFingerprints)
+      .set({ globalUserId: masterProfileId, updatedAt: new Date() })
+      .where(eq(deviceFingerprints.globalUserId, mergedProfileId));
+
+    // Update analytics events to point to master profile
+    await db
+      .update(analyticsEvents)
+      .set({ globalUserId: masterProfileId })
+      .where(eq(analyticsEvents.globalUserId, mergedProfileId));
+
+    // Record the merge history
+    await db.insert(userProfileMergeHistory).values({
+      masterProfileId,
+      mergedProfileId,
+      mergeReason: reason,
+      mergeConfidence: confidence,
+      mergeData: { masterProfile, mergedProfile },
+      mergedBy: 'system'
+    });
+
+    // Delete the merged profile
+    await db.delete(globalUserProfiles).where(eq(globalUserProfiles.id, mergedProfileId));
+  }
+
+  async getUserProfileMergeHistory(masterProfileId: number): Promise<UserProfileMergeHistory[]> {
+    return await db.select().from(userProfileMergeHistory)
+      .where(eq(userProfileMergeHistory.masterProfileId, masterProfileId))
+      .orderBy(desc(userProfileMergeHistory.mergedAt));
+  }
+
+  // Analytics Events operations
+  async trackAnalyticsEvent(event: InsertAnalyticsEvent): Promise<AnalyticsEvent> {
+    const [newEvent] = await db.insert(analyticsEvents).values(event).returning();
+    return newEvent;
+  }
+
+  async trackAnalyticsEventBatch(events: InsertAnalyticsEvent[]): Promise<AnalyticsEvent[]> {
+    if (events.length === 0) return [];
+    return await db.insert(analyticsEvents).values(events).returning();
+  }
+
+  async getAnalyticsEvents(filters: {
+    sessionId?: string;
+    globalUserId?: number;
+    eventType?: string;
+    startDate?: Date;
+    endDate?: Date;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<AnalyticsEvent[]> {
+    const { sessionId, globalUserId, eventType, startDate, endDate, limit = 100, offset = 0 } = filters;
+    
+    let whereConditions = [];
+    if (sessionId) whereConditions.push(eq(analyticsEvents.sessionId, sessionId));
+    if (globalUserId) whereConditions.push(eq(analyticsEvents.globalUserId, globalUserId));
+    if (eventType) whereConditions.push(eq(analyticsEvents.eventType, eventType));
+    if (startDate && endDate) {
+      whereConditions.push(
+        gte(analyticsEvents.serverTimestamp, startDate),
+        lte(analyticsEvents.serverTimestamp, endDate)
+      );
+    }
+
+    return await db.select().from(analyticsEvents)
+      .where(whereConditions.length > 0 ? and(...whereConditions) : sql`true`)
+      .orderBy(desc(analyticsEvents.serverTimestamp))
+      .limit(limit)
+      .offset(offset);
+  }
+
+  async getAnalyticsEventsByUser(globalUserId: number, limit: number = 100): Promise<AnalyticsEvent[]> {
+    return await db.select().from(analyticsEvents)
+      .where(eq(analyticsEvents.globalUserId, globalUserId))
+      .orderBy(desc(analyticsEvents.serverTimestamp))
+      .limit(limit);
+  }
+
+  async getAnalyticsEventsBySession(sessionId: string): Promise<AnalyticsEvent[]> {
+    return await db.select().from(analyticsEvents)
+      .where(eq(analyticsEvents.sessionId, sessionId))
+      .orderBy(desc(analyticsEvents.serverTimestamp));
+  }
+
+  async processAnalyticsEvents(batchId: string): Promise<void> {
+    await db
+      .update(analyticsEvents)
+      .set({ isProcessed: true })
+      .where(eq(analyticsEvents.batchId, batchId));
+  }
+
+  // Session Bridge operations
+  async createSessionBridge(bridge: InsertSessionBridge): Promise<SessionBridge> {
+    const [newBridge] = await db.insert(sessionBridge).values(bridge).returning();
+    return newBridge;
+  }
+
+  async getSessionBridge(sessionId: string): Promise<SessionBridge | undefined> {
+    const [bridge] = await db.select().from(sessionBridge).where(eq(sessionBridge.sessionId, sessionId));
+    return bridge;
+  }
+
+  async updateSessionBridge(id: number, bridge: Partial<InsertSessionBridge>): Promise<SessionBridge> {
+    const [updatedBridge] = await db
+      .update(sessionBridge)
+      .set(bridge)
+      .where(eq(sessionBridge.id, id))
+      .returning();
+    return updatedBridge;
+  }
+
+  async linkSessionToGlobalUser(sessionId: string, globalUserId: number, method: string, confidence: number): Promise<void> {
+    const existingBridge = await this.getSessionBridge(sessionId);
+    
+    if (existingBridge) {
+      await this.updateSessionBridge(existingBridge.id, {
+        globalUserId,
+        linkMethod: method,
+        linkConfidence: confidence
+      });
+    } else {
+      await this.createSessionBridge({
+        sessionId,
+        globalUserId,
+        linkMethod: method,
+        linkConfidence: confidence
+      });
+    }
+  }
+
+  // Analytics Sync Status operations
+  async createAnalyticsSyncStatus(status: InsertAnalyticsSyncStatus): Promise<AnalyticsSyncStatus> {
+    const [newStatus] = await db.insert(analyticsSyncStatus).values(status).returning();
+    return newStatus;
+  }
+
+  async getAnalyticsSyncStatus(sessionId: string): Promise<AnalyticsSyncStatus | undefined> {
+    const [status] = await db.select().from(analyticsSyncStatus).where(eq(analyticsSyncStatus.sessionId, sessionId));
+    return status;
+  }
+
+  async updateAnalyticsSyncStatus(id: number, status: Partial<InsertAnalyticsSyncStatus>): Promise<AnalyticsSyncStatus> {
+    const [updatedStatus] = await db
+      .update(analyticsSyncStatus)
+      .set({ ...status, updatedAt: new Date() })
+      .where(eq(analyticsSyncStatus.id, id))
+      .returning();
+    return updatedStatus;
+  }
+
+  // Cross-device User Recognition
+  async findUserByFingerprint(fingerprint: string): Promise<GlobalUserProfile | undefined> {
+    const deviceFingerprint = await this.getDeviceFingerprint(fingerprint);
+    if (!deviceFingerprint?.globalUserId) return undefined;
+    
+    return await this.getGlobalUserProfile(deviceFingerprint.globalUserId);
+  }
+
+  async findUserByEmail(email: string, createIfNotExists: boolean = false): Promise<GlobalUserProfile> {
+    let profile = await this.getGlobalUserProfileByEmail(email);
+    
+    if (!profile && createIfNotExists) {
+      profile = await this.createGlobalUserProfile({
+        uuid: randomUUID(),
+        email,
+        firstVisit: new Date(),
+        lastVisit: new Date()
+      });
+    }
+    
+    if (!profile) {
+      throw new Error('User not found');
+    }
+    
+    return profile;
+  }
+
+  async findUserByPhone(phone: string, createIfNotExists: boolean = false): Promise<GlobalUserProfile> {
+    let profile = await this.getGlobalUserProfileByPhone(phone);
+    
+    if (!profile && createIfNotExists) {
+      profile = await this.createGlobalUserProfile({
+        uuid: randomUUID(),
+        phone,
+        firstVisit: new Date(),
+        lastVisit: new Date()
+      });
+    }
+    
+    if (!profile) {
+      throw new Error('User not found');
+    }
+    
+    return profile;
+  }
+
+  async identifyUser(sessionId: string, identifiers: {
+    email?: string;
+    phone?: string;
+    fingerprint?: string;
+    deviceInfo?: any;
+  }): Promise<GlobalUserProfile> {
+    const { email, phone, fingerprint, deviceInfo } = identifiers;
+    
+    // Try to find existing user by email first (highest confidence)
+    if (email) {
+      const userByEmail = await this.getGlobalUserProfileByEmail(email);
+      if (userByEmail) {
+        await this.linkSessionToGlobalUser(sessionId, userByEmail.id, 'email', 95);
+        return userByEmail;
+      }
+    }
+
+    // Try to find existing user by phone (high confidence)
+    if (phone) {
+      const userByPhone = await this.getGlobalUserProfileByPhone(phone);
+      if (userByPhone) {
+        await this.linkSessionToGlobalUser(sessionId, userByPhone.id, 'phone', 90);
+        return userByPhone;
+      }
+    }
+
+    // Try to find existing user by fingerprint (medium confidence)
+    if (fingerprint) {
+      const userByFingerprint = await this.findUserByFingerprint(fingerprint);
+      if (userByFingerprint) {
+        await this.linkSessionToGlobalUser(sessionId, userByFingerprint.id, 'fingerprint', 70);
+        return userByFingerprint;
+      }
+    }
+
+    // Create new user if not found
+    const newUser = await this.createGlobalUserProfile({
+      uuid: randomUUID(),
+      email,
+      phone,
+      firstVisit: new Date(),
+      lastVisit: new Date(),
+      totalSessions: 1
+    });
+
+    // Link session to new user
+    await this.linkSessionToGlobalUser(sessionId, newUser.id, 'created', 100);
+
+    // Create device fingerprint if provided
+    if (fingerprint && deviceInfo) {
+      await this.createDeviceFingerprint({
+        fingerprint,
+        globalUserId: newUser.id,
+        deviceInfo,
+        browserInfo: deviceInfo.browserInfo || {},
+        confidenceScore: 80
+      });
+    }
+
+    return newUser;
+  }
+
+  // Analytics Dashboard Data
+  async getComprehensiveAnalytics(filters: {
+    startDate?: Date;
+    endDate?: Date;
+    globalUserId?: number;
+    deviceType?: string;
+    eventType?: string;
+  } = {}): Promise<any> {
+    const { startDate, endDate, globalUserId, deviceType, eventType } = filters;
+    
+    // Get basic metrics
+    const totalUsers = await db.select({ count: count() }).from(globalUserProfiles);
+    const totalSessions = await db.select({ count: count() }).from(sessionBridge);
+    const totalEvents = await db.select({ count: count() }).from(analyticsEvents);
+    
+    // Get events with filters
+    const events = await this.getAnalyticsEvents({
+      globalUserId,
+      eventType,
+      startDate,
+      endDate,
+      limit: 10000
+    });
+
+    // Process events for charts
+    const eventsByDay = events.reduce((acc, event) => {
+      const date = event.serverTimestamp?.toISOString().split('T')[0] || new Date().toISOString().split('T')[0];
+      acc[date] = (acc[date] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const eventsByType = events.reduce((acc, event) => {
+      acc[event.eventType] = (acc[event.eventType] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const eventsByDevice = events.reduce((acc, event) => {
+      const device = event.deviceType || 'unknown';
+      acc[device] = (acc[device] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    return {
+      summary: {
+        totalUsers: totalUsers[0].count,
+        totalSessions: totalSessions[0].count,
+        totalEvents: totalEvents[0].count,
+        avgEventsPerUser: totalUsers[0].count > 0 ? (totalEvents[0].count / totalUsers[0].count).toFixed(2) : '0'
+      },
+      charts: {
+        eventsByDay: Object.entries(eventsByDay).map(([date, count]) => ({ date, count })),
+        eventsByType: Object.entries(eventsByType).map(([type, count]) => ({ type, count })),
+        eventsByDevice: Object.entries(eventsByDevice).map(([device, count]) => ({ device, count }))
+      },
+      filters: { startDate, endDate, globalUserId, deviceType, eventType }
+    };
+  }
+
+  async getUserJourney(globalUserId: number): Promise<any> {
+    const events = await this.getAnalyticsEventsByUser(globalUserId, 1000);
+    const user = await this.getGlobalUserProfile(globalUserId);
+    const devices = await this.getDeviceFingerprintsByUser(globalUserId);
+    
+    const journeySteps = events.map(event => ({
+      timestamp: event.serverTimestamp,
+      eventType: event.eventType,
+      pageSlug: event.pageSlug,
+      eventAction: event.eventAction,
+      deviceType: event.deviceType,
+      sessionId: event.sessionId
+    }));
+
+    return {
+      user,
+      devices,
+      journeySteps: journeySteps.slice(0, 100), // Latest 100 steps
+      summary: {
+        totalEvents: events.length,
+        deviceCount: devices.length,
+        sessionCount: new Set(events.map(e => e.sessionId)).size,
+        firstEvent: events[events.length - 1]?.serverTimestamp,
+        lastEvent: events[0]?.serverTimestamp
+      }
+    };
+  }
+
+  async getCrossDeviceStats(): Promise<any> {
+    const usersWithMultipleDevices = await db
+      .select({
+        globalUserId: deviceFingerprints.globalUserId,
+        deviceCount: count()
+      })
+      .from(deviceFingerprints)
+      .where(eq(deviceFingerprints.isActive, true))
+      .groupBy(deviceFingerprints.globalUserId)
+      .having(sql`COUNT(*) > 1`);
+
+    const totalUsers = await db.select({ count: count() }).from(globalUserProfiles);
+    const totalDevices = await db.select({ count: count() }).from(deviceFingerprints);
+
+    return {
+      totalUsers: totalUsers[0].count,
+      totalDevices: totalDevices[0].count,
+      usersWithMultipleDevices: usersWithMultipleDevices.length,
+      crossDeviceRate: totalUsers[0].count > 0 ? 
+        (usersWithMultipleDevices.length / totalUsers[0].count * 100).toFixed(2) : '0',
+      avgDevicesPerUser: totalUsers[0].count > 0 ? 
+        (totalDevices[0].count / totalUsers[0].count).toFixed(2) : '0'
+    };
+  }
+
+  async getEngagementMetrics(globalUserId?: number): Promise<any> {
+    let whereCondition = globalUserId ? eq(analyticsEvents.globalUserId, globalUserId) : sql`true`;
+    
+    const engagementData = await db
+      .select({
+        eventType: analyticsEvents.eventType,
+        count: count(),
+        avgProcessingDelay: sql<number>`AVG(${analyticsEvents.processingDelay})`
+      })
+      .from(analyticsEvents)
+      .where(whereCondition)
+      .groupBy(analyticsEvents.eventType);
+
+    const sessionEngagement = await db
+      .select({
+        sessionId: analyticsEvents.sessionId,
+        eventCount: count(),
+        sessionDuration: sql<number>`MAX(${analyticsEvents.serverTimestamp}) - MIN(${analyticsEvents.serverTimestamp})`
+      })
+      .from(analyticsEvents)
+      .where(whereCondition)
+      .groupBy(analyticsEvents.sessionId);
+
+    return {
+      eventTypes: engagementData,
+      avgEventsPerSession: sessionEngagement.length > 0 ? 
+        (sessionEngagement.reduce((sum, s) => sum + s.eventCount, 0) / sessionEngagement.length).toFixed(2) : '0',
+      avgSessionDuration: sessionEngagement.length > 0 ? 
+        (sessionEngagement.reduce((sum, s) => sum + (s.sessionDuration || 0), 0) / sessionEngagement.length / 1000).toFixed(2) : '0'
+    };
+  }
+
+  async getConversionFunnelData(funnelType: string = 'default'): Promise<any> {
+    // Define funnel steps based on event types
+    const funnelSteps = [
+      { name: 'Page View', eventType: 'page_view' },
+      { name: 'Interaction', eventType: 'interaction' },
+      { name: 'Lead Capture', eventType: 'lead_capture' },
+      { name: 'Conversion', eventType: 'conversion' }
+    ];
+
+    const funnelData = await Promise.all(
+      funnelSteps.map(async (step) => {
+        const stepCount = await db
+          .select({ count: count() })
+          .from(analyticsEvents)
+          .where(eq(analyticsEvents.eventType, step.eventType));
+        
+        return {
+          step: step.name,
+          count: stepCount[0].count,
+          eventType: step.eventType
+        };
+      })
+    );
+
+    // Calculate conversion rates
+    const funnelWithRates = funnelData.map((step, index) => {
+      const previousStep = index > 0 ? funnelData[index - 1] : null;
+      const conversionRate = previousStep && previousStep.count > 0 ? 
+        (step.count / previousStep.count * 100).toFixed(2) : '100';
+      
+      return {
+        ...step,
+        conversionRate: `${conversionRate}%`
+      };
+    });
+
+    return {
+      funnelSteps: funnelWithRates,
+      totalConversions: funnelData[funnelData.length - 1].count,
+      overallConversionRate: funnelData[0].count > 0 ? 
+        (funnelData[funnelData.length - 1].count / funnelData[0].count * 100).toFixed(2) : '0'
+    };
+  }
+
+  // Export/Import functionality
+  async exportUserData(globalUserId: number): Promise<any> {
+    const user = await this.getGlobalUserProfile(globalUserId);
+    if (!user) throw new Error('User not found');
+
+    const events = await this.getAnalyticsEventsByUser(globalUserId);
+    const devices = await this.getDeviceFingerprintsByUser(globalUserId);
+    const mergeHistory = await this.getUserProfileMergeHistory(globalUserId);
+
+    return {
+      user,
+      events,
+      devices,
+      mergeHistory,
+      exportedAt: new Date().toISOString()
+    };
+  }
+
+  async exportAnalyticsData(filters: any = {}): Promise<any> {
+    const analytics = await this.getComprehensiveAnalytics(filters);
+    const crossDeviceStats = await this.getCrossDeviceStats();
+    const engagementMetrics = await this.getEngagementMetrics();
+    const conversionFunnel = await this.getConversionFunnelData();
+
+    return {
+      analytics,
+      crossDeviceStats,
+      engagementMetrics,
+      conversionFunnel,
+      exportedAt: new Date().toISOString(),
+      filters
+    };
+  }
+
+  async importAnalyticsData(data: any): Promise<void> {
+    // This would be implemented based on specific import requirements
+    // For now, just validate the data structure
+    if (!data.analytics || !data.exportedAt) {
+      throw new Error('Invalid import data structure');
+    }
+    
+    // Implementation would depend on the specific import format
+    // and what data needs to be imported
   }
 }
 

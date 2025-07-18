@@ -29,6 +29,16 @@ The **Findawise Empire** is a comprehensive affiliate management and analytics p
 - **Session Integration**: Personalized forms based on user behavior and segmentation
 - **Lead Management**: Full dashboard with analytics, CSV export, and lead scoring
 
+### 📱 Cross-Device Analytics & User Profiles
+- **Cross-Device User Recognition**: Advanced device fingerprinting and session bridging
+- **Real-Time Event Tracking**: Comprehensive event tracking with batching and offline support
+- **Global User Profiles**: Unified user profiles across all devices and sessions
+- **Device Fingerprinting**: Browser-compatible device identification and tracking
+- **Session Management**: Intelligent session linking and user identification
+- **Analytics Dashboard**: Complete admin interface with journey tracking and funnel analysis
+- **Data Export**: Full user data export with CSV and JSON formats
+- **Privacy Compliance**: Built-in privacy controls and data management
+
 ### 🎨 Dynamic Page Generation
 - **Config-Driven Architecture**: All pages generated from central JSON configuration
 - **Emotion-Based Theming**: 5 psychological emotion themes (trust, excitement, relief, confidence, calm)
@@ -1313,6 +1323,391 @@ The system can be migrated to other frameworks:
 4. Update state management to Pinia/Vuex
 
 #### Vanilla JavaScript Migration
+
+## Backend Analytics Sync & Cross-Device User Profiles
+
+The Findawise Empire features a comprehensive backend analytics sync system that provides real-time event tracking, cross-device user recognition, and advanced analytics capabilities for enterprise-scale data analysis.
+
+### Core Features
+
+#### 🔄 Real-Time Event Tracking
+- **Batch Processing**: Efficient event batching with configurable batch sizes and timeouts
+- **Offline Support**: Queue events locally when offline and sync when connection returns
+- **Event Validation**: Server-side validation with Zod schemas for data integrity
+- **Processing Delay Tracking**: Monitor sync performance and network delays
+
+#### 👤 Cross-Device User Recognition
+- **Device Fingerprinting**: Browser-compatible device identification using canvas, screen, and timing APIs
+- **Session Bridging**: Intelligent session linking across devices and browsers
+- **User Profile Merging**: Automatic and manual user profile consolidation
+- **Identity Resolution**: Email, phone, and fingerprint-based user identification
+
+#### 📊 Global User Profiles
+- **Unified Profiles**: Single user profile across all devices and sessions
+- **Behavioral Tracking**: Comprehensive user behavior and interaction tracking
+- **Lifecycle Management**: First visit, last visit, and activity status tracking
+- **Privacy Controls**: Built-in privacy compliance and data management
+
+### Database Schema
+
+#### Global User Profiles
+```sql
+CREATE TABLE global_user_profiles (
+  id SERIAL PRIMARY KEY,
+  uuid VARCHAR(255) UNIQUE NOT NULL,
+  email VARCHAR(255) UNIQUE,
+  phone VARCHAR(20),
+  first_name VARCHAR(255),
+  last_name VARCHAR(255),
+  total_sessions INTEGER DEFAULT 0,
+  total_page_views INTEGER DEFAULT 0,
+  total_interactions INTEGER DEFAULT 0,
+  conversion_count INTEGER DEFAULT 0,
+  lifetime_value DECIMAL(10,2) DEFAULT 0.00,
+  first_visit TIMESTAMP,
+  last_visit TIMESTAMP,
+  is_active BOOLEAN DEFAULT true,
+  merge_history JSONB,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+#### Device Fingerprints
+```sql
+CREATE TABLE device_fingerprints (
+  id SERIAL PRIMARY KEY,
+  fingerprint VARCHAR(255) UNIQUE NOT NULL,
+  global_user_id INTEGER REFERENCES global_user_profiles(id),
+  device_info JSONB NOT NULL,
+  browser_info JSONB NOT NULL,
+  first_seen TIMESTAMP DEFAULT NOW(),
+  last_seen TIMESTAMP DEFAULT NOW(),
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+#### Analytics Events
+```sql
+CREATE TABLE analytics_events (
+  id SERIAL PRIMARY KEY,
+  session_id VARCHAR(255) NOT NULL,
+  global_user_id INTEGER REFERENCES global_user_profiles(id),
+  event_type VARCHAR(100) NOT NULL,
+  event_action VARCHAR(100) NOT NULL,
+  page_slug VARCHAR(255),
+  element_id VARCHAR(255),
+  metadata JSONB,
+  client_timestamp TIMESTAMP NOT NULL,
+  server_timestamp TIMESTAMP DEFAULT NOW(),
+  device_type VARCHAR(50),
+  browser_info JSONB,
+  batch_id VARCHAR(255),
+  is_processed BOOLEAN DEFAULT false,
+  processing_delay INTEGER DEFAULT 0,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+#### Session Bridges
+```sql
+CREATE TABLE session_bridges (
+  id SERIAL PRIMARY KEY,
+  session_id VARCHAR(255) UNIQUE NOT NULL,
+  global_user_id INTEGER REFERENCES global_user_profiles(id),
+  device_fingerprint VARCHAR(255),
+  linking_method VARCHAR(50) NOT NULL,
+  confidence_score INTEGER DEFAULT 80,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+### Backend API Endpoints
+
+#### User Profile Management
+```javascript
+// Get all user profiles
+GET /api/analytics/user-profiles?limit=100&offset=0
+
+// Get specific user profile
+GET /api/analytics/user-profiles/:id
+
+// Create new user profile
+POST /api/analytics/user-profiles
+{
+  "email": "user@example.com",
+  "firstName": "John",
+  "lastName": "Doe"
+}
+
+// Update user profile
+PUT /api/analytics/user-profiles/:id
+{
+  "firstName": "Jane",
+  "lastName": "Smith"
+}
+
+// Search user profiles
+GET /api/analytics/user-profiles/search/:query
+```
+
+#### Device Fingerprinting
+```javascript
+// Create device fingerprint
+POST /api/analytics/device-fingerprints
+{
+  "fingerprint": "abc123...",
+  "globalUserId": 1,
+  "deviceInfo": {
+    "userAgent": "Mozilla/5.0...",
+    "platform": "MacIntel",
+    "screenWidth": 1920,
+    "screenHeight": 1080
+  }
+}
+
+// Get device fingerprint
+GET /api/analytics/device-fingerprints/:fingerprint
+
+// Get all fingerprints for user
+GET /api/analytics/device-fingerprints/user/:userId
+```
+
+#### Event Tracking
+```javascript
+// Track single event
+POST /api/analytics/events
+{
+  "sessionId": "session123",
+  "globalUserId": 1,
+  "eventType": "interaction",
+  "eventAction": "click",
+  "pageSlug": "home",
+  "elementId": "cta-button",
+  "metadata": {
+    "buttonText": "Get Started",
+    "position": "header"
+  }
+}
+
+// Track batch of events
+POST /api/analytics/events/batch
+{
+  "events": [
+    {
+      "sessionId": "session123",
+      "eventType": "page",
+      "eventAction": "view",
+      "pageSlug": "home"
+    },
+    {
+      "sessionId": "session123",
+      "eventType": "interaction",
+      "eventAction": "click",
+      "elementId": "menu-item"
+    }
+  ]
+}
+
+// Get events with filters
+GET /api/analytics/events?sessionId=session123&eventType=interaction&startDate=2025-01-01&endDate=2025-01-31
+```
+
+#### User Identification
+```javascript
+// Identify user across devices
+POST /api/analytics/identify-user
+{
+  "sessionId": "session123",
+  "email": "user@example.com",
+  "deviceInfo": {
+    "userAgent": "Mozilla/5.0...",
+    "platform": "MacIntel"
+  }
+}
+
+// Find user by fingerprint
+GET /api/analytics/user-by-fingerprint/:fingerprint
+
+// Find user by email
+GET /api/analytics/user-by-email/:email?create=true
+```
+
+### Client-Side Analytics SDK
+
+#### Analytics Sync Service
+```javascript
+// Initialize analytics sync
+import { analyticsSync } from '@/lib/analyticsSync';
+
+// Track events
+analyticsSync.trackEvent('interaction', 'click', {
+  elementId: 'cta-button',
+  buttonText: 'Get Started'
+});
+
+// Track page views
+analyticsSync.trackPageView('home');
+
+// Track conversions
+analyticsSync.trackConversion('purchase', 99.99, {
+  productId: 'product123',
+  currency: 'USD'
+});
+
+// Identify users
+await analyticsSync.identifyUser({
+  email: 'user@example.com',
+  phone: '+1234567890'
+});
+```
+
+#### React Hooks
+```javascript
+// Use analytics in React components
+import { useAnalytics } from '@/hooks/useAnalytics';
+
+const MyComponent = () => {
+  const {
+    track,
+    trackPageView,
+    trackConversion,
+    identifyUser,
+    syncStatus,
+    isOnline,
+    pendingEvents
+  } = useAnalytics();
+
+  const handleClick = () => {
+    track('interaction', 'button_click', {
+      buttonId: 'submit-form',
+      formStep: 2
+    });
+  };
+
+  return (
+    <div>
+      <button onClick={handleClick}>Submit</button>
+      <p>Pending events: {pendingEvents}</p>
+      <p>Online: {isOnline ? 'Yes' : 'No'}</p>
+    </div>
+  );
+};
+```
+
+### Analytics Dashboard
+
+The comprehensive analytics dashboard provides real-time insights into user behavior, cross-device usage, and conversion tracking.
+
+#### Key Features
+- **Real-Time Analytics**: Live event tracking and user behavior monitoring
+- **Cross-Device Insights**: User journey tracking across multiple devices
+- **Conversion Funnels**: Step-by-step conversion analysis and optimization
+- **User Journey Mapping**: Detailed user path analysis and behavior flows
+- **Export Capabilities**: CSV and JSON export for external analysis
+- **Privacy Controls**: Built-in privacy compliance and data management
+
+#### Dashboard Sections
+1. **Overview**: High-level metrics and KPIs
+2. **Users**: User profile management and search
+3. **Devices**: Cross-device statistics and fingerprint management
+4. **Events**: Detailed event analytics and filtering
+5. **Journey**: Individual user journey tracking
+6. **Funnel**: Conversion funnel analysis and optimization
+
+### Data Export and Import
+
+#### Analytics Data Export
+```javascript
+// Export user data
+GET /api/analytics/export/user/:userId
+
+// Export analytics data with filters
+GET /api/analytics/export/analytics?startDate=2025-01-01&endDate=2025-01-31&eventType=conversion
+
+// Export complete system data
+GET /api/analytics/export/system
+```
+
+#### Data Import
+```javascript
+// Import analytics data
+POST /api/analytics/import
+{
+  "data": {
+    "users": [...],
+    "events": [...],
+    "fingerprints": [...]
+  }
+}
+```
+
+### Privacy and Compliance
+
+#### GDPR Compliance
+- **Data Minimization**: Only collect necessary data for analytics
+- **User Consent**: Built-in consent management and tracking
+- **Right to Deletion**: Complete user data deletion capabilities
+- **Data Export**: User data export in machine-readable format
+- **Anonymization**: Automatic data anonymization after retention period
+
+#### Privacy Controls
+```javascript
+// Delete user data
+DELETE /api/analytics/user-profiles/:id?anonymize=true
+
+// Export user data for GDPR compliance
+GET /api/analytics/user-profiles/:id/export
+
+// Update privacy settings
+PUT /api/analytics/user-profiles/:id/privacy
+{
+  "trackingConsent": true,
+  "marketingConsent": false,
+  "dataRetentionDays": 365
+}
+```
+
+### Performance Optimization
+
+#### Batch Processing
+- **Configurable Batch Size**: Adjust batch size based on traffic volume
+- **Intelligent Batching**: Automatic batching based on event frequency
+- **Retry Logic**: Robust retry mechanism for failed sync operations
+- **Queue Management**: Efficient queue management with priority handling
+
+#### Caching Strategy
+- **Redis Integration**: Optional Redis caching for high-performance scenarios
+- **In-Memory Caching**: Built-in memory caching for frequently accessed data
+- **Cache Invalidation**: Intelligent cache invalidation based on data changes
+- **CDN Integration**: CDN-friendly static asset caching
+
+### Monitoring and Alerting
+
+#### Health Checks
+```javascript
+// Check sync health
+GET /api/analytics/sync-health
+{
+  "status": "healthy",
+  "queueSize": 42,
+  "activeQueues": 5,
+  "batchSize": 50,
+  "batchTimeout": 5000,
+  "timestamp": "2025-01-18T15:30:00Z"
+}
+```
+
+#### Performance Metrics
+- **Sync Latency**: Monitor event processing delays
+- **Queue Depth**: Track pending event queue sizes
+- **Error Rates**: Monitor sync failure rates and retry counts
+- **User Activity**: Track active user sessions and device usage
+
+The backend analytics sync system provides enterprise-grade analytics capabilities with cross-device user recognition, real-time event tracking, and comprehensive privacy controls. The system is designed for scalability, performance, and compliance with modern privacy regulations.
 1. Export configuration and content
 2. Convert React components to vanilla JS
 3. Implement routing with History API

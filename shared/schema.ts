@@ -472,3 +472,196 @@ export type LeadActivity = typeof leadActivities.$inferSelect;
 
 export type InsertEmailCampaign = z.infer<typeof insertEmailCampaignSchema>;
 export type EmailCampaign = typeof emailCampaigns.$inferSelect;
+
+// ===========================================
+// CROSS-DEVICE USER PROFILES & FINGERPRINTING
+// ===========================================
+
+// Global User Profiles table - master user profiles across all devices
+export const globalUserProfiles = pgTable("global_user_profiles", {
+  id: serial("id").primaryKey(),
+  uuid: varchar("uuid", { length: 36 }).notNull().unique(), // Master UUID for the user
+  email: varchar("email", { length: 255 }).unique(), // Primary email for merging
+  phone: varchar("phone", { length: 20 }).unique(), // Primary phone for merging
+  firstName: varchar("first_name", { length: 100 }),
+  lastName: varchar("last_name", { length: 100 }),
+  mergedFromSessions: jsonb("merged_from_sessions"), // Array of session IDs that were merged into this profile
+  totalSessions: integer("total_sessions").default(0),
+  totalPageViews: integer("total_page_views").default(0),
+  totalInteractions: integer("total_interactions").default(0),
+  totalTimeOnSite: integer("total_time_on_site").default(0), // in milliseconds
+  firstVisit: timestamp("first_visit"),
+  lastVisit: timestamp("last_visit"),
+  preferredDeviceType: varchar("preferred_device_type", { length: 50 }), // mobile, desktop, tablet
+  preferredBrowser: varchar("preferred_browser", { length: 50 }),
+  preferredOS: varchar("preferred_os", { length: 50 }),
+  locationData: jsonb("location_data"), // Aggregated location info
+  preferences: jsonb("preferences"), // User preferences and settings
+  segments: jsonb("segments"), // User segments array
+  tags: jsonb("tags"), // User tags array
+  customAttributes: jsonb("custom_attributes"), // Additional custom data
+  lifetimeValue: integer("lifetime_value").default(0), // in cents
+  conversionCount: integer("conversion_count").default(0),
+  leadQualityScore: integer("lead_quality_score").default(0), // 0-100
+  engagementScore: integer("engagement_score").default(0), // 0-100
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Device Fingerprints table - tracks unique device fingerprints
+export const deviceFingerprints = pgTable("device_fingerprints", {
+  id: serial("id").primaryKey(),
+  fingerprint: varchar("fingerprint", { length: 255 }).notNull().unique(),
+  globalUserId: integer("global_user_id").references(() => globalUserProfiles.id),
+  deviceInfo: jsonb("device_info").notNull(), // Screen resolution, timezone, language, etc.
+  browserInfo: jsonb("browser_info").notNull(), // User agent, plugins, canvas fingerprint
+  hardwareInfo: jsonb("hardware_info"), // CPU, GPU, memory info
+  networkInfo: jsonb("network_info"), // IP history, connection type
+  confidenceScore: integer("confidence_score").default(0), // 0-100, how confident we are in this fingerprint
+  sessionCount: integer("session_count").default(0),
+  firstSeen: timestamp("first_seen").defaultNow(),
+  lastSeen: timestamp("last_seen").defaultNow(),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// User Profile Merge History table - tracks profile merges
+export const userProfileMergeHistory = pgTable("user_profile_merge_history", {
+  id: serial("id").primaryKey(),
+  masterProfileId: integer("master_profile_id").references(() => globalUserProfiles.id),
+  mergedProfileId: integer("merged_profile_id"), // ID of the profile that was merged (now deleted)
+  mergedSessionIds: jsonb("merged_session_ids"), // Array of session IDs that were merged
+  mergeReason: varchar("merge_reason", { length: 100 }).notNull(), // 'email_match', 'phone_match', 'fingerprint_match', 'manual'
+  mergeConfidence: integer("merge_confidence").default(0), // 0-100
+  mergeData: jsonb("merge_data"), // Additional merge information
+  mergedAt: timestamp("merged_at").defaultNow(),
+  mergedBy: varchar("merged_by", { length: 255 }), // System or user ID
+});
+
+// Analytics Events table - comprehensive event tracking
+export const analyticsEvents = pgTable("analytics_events", {
+  id: serial("id").primaryKey(),
+  eventId: varchar("event_id", { length: 36 }).notNull().unique(), // UUID for deduplication
+  sessionId: varchar("session_id", { length: 255 }).notNull(),
+  globalUserId: integer("global_user_id").references(() => globalUserProfiles.id),
+  deviceFingerprint: varchar("device_fingerprint", { length: 255 }),
+  eventType: varchar("event_type", { length: 100 }).notNull(),
+  eventCategory: varchar("event_category", { length: 100 }),
+  eventAction: varchar("event_action", { length: 100 }),
+  eventLabel: varchar("event_label", { length: 255 }),
+  eventValue: integer("event_value"),
+  pageSlug: varchar("page_slug", { length: 255 }),
+  pageTitle: varchar("page_title", { length: 255 }),
+  referrerUrl: text("referrer_url"),
+  utmSource: varchar("utm_source", { length: 100 }),
+  utmMedium: varchar("utm_medium", { length: 100 }),
+  utmCampaign: varchar("utm_campaign", { length: 100 }),
+  utmTerm: varchar("utm_term", { length: 100 }),
+  utmContent: varchar("utm_content", { length: 100 }),
+  deviceType: varchar("device_type", { length: 50 }),
+  browserName: varchar("browser_name", { length: 50 }),
+  browserVersion: varchar("browser_version", { length: 50 }),
+  operatingSystem: varchar("operating_system", { length: 50 }),
+  screenResolution: varchar("screen_resolution", { length: 50 }),
+  language: varchar("language", { length: 10 }),
+  timezone: varchar("timezone", { length: 50 }),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  country: varchar("country", { length: 5 }),
+  region: varchar("region", { length: 100 }),
+  city: varchar("city", { length: 100 }),
+  coordinates: jsonb("coordinates"), // {lat, lng}
+  customData: jsonb("custom_data"), // Additional event-specific data
+  serverTimestamp: timestamp("server_timestamp").defaultNow(),
+  clientTimestamp: timestamp("client_timestamp"),
+  processingDelay: integer("processing_delay"), // milliseconds between client and server
+  isProcessed: boolean("is_processed").default(false),
+  batchId: varchar("batch_id", { length: 36 }), // For batch processing
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Session Bridge table - links sessions to global user profiles
+export const sessionBridge = pgTable("session_bridge", {
+  id: serial("id").primaryKey(),
+  sessionId: varchar("session_id", { length: 255 }).notNull().unique(),
+  globalUserId: integer("global_user_id").references(() => globalUserProfiles.id),
+  deviceFingerprint: varchar("device_fingerprint", { length: 255 }),
+  linkMethod: varchar("link_method", { length: 50 }).notNull(), // 'email', 'phone', 'fingerprint', 'manual'
+  linkConfidence: integer("link_confidence").default(0), // 0-100
+  linkData: jsonb("link_data"), // Additional linking information
+  linkedAt: timestamp("linked_at").defaultNow(),
+  isActive: boolean("is_active").default(true),
+});
+
+// Analytics Sync Status table - tracks sync status for client-server analytics
+export const analyticsSyncStatus = pgTable("analytics_sync_status", {
+  id: serial("id").primaryKey(),
+  sessionId: varchar("session_id", { length: 255 }).notNull(),
+  globalUserId: integer("global_user_id").references(() => globalUserProfiles.id),
+  lastSyncAt: timestamp("last_sync_at").defaultNow(),
+  lastClientEventId: varchar("last_client_event_id", { length: 36 }),
+  lastServerEventId: varchar("last_server_event_id", { length: 36 }),
+  pendingEventCount: integer("pending_event_count").default(0),
+  syncVersion: varchar("sync_version", { length: 10 }).default("1.0"),
+  clientVersion: varchar("client_version", { length: 20 }),
+  deviceFingerprint: varchar("device_fingerprint", { length: 255 }),
+  syncErrors: jsonb("sync_errors"), // Array of sync errors
+  isHealthy: boolean("is_healthy").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Insert schemas for cross-device system
+export const insertGlobalUserProfileSchema = createInsertSchema(globalUserProfiles).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertDeviceFingerprintSchema = createInsertSchema(deviceFingerprints).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertUserProfileMergeHistorySchema = createInsertSchema(userProfileMergeHistory).omit({
+  id: true,
+  mergedAt: true,
+});
+
+export const insertAnalyticsEventSchema = createInsertSchema(analyticsEvents).omit({
+  id: true,
+  serverTimestamp: true,
+  createdAt: true,
+});
+
+export const insertSessionBridgeSchema = createInsertSchema(sessionBridge).omit({
+  id: true,
+  linkedAt: true,
+});
+
+export const insertAnalyticsSyncStatusSchema = createInsertSchema(analyticsSyncStatus).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+// Types for cross-device system
+export type InsertGlobalUserProfile = z.infer<typeof insertGlobalUserProfileSchema>;
+export type GlobalUserProfile = typeof globalUserProfiles.$inferSelect;
+
+export type InsertDeviceFingerprint = z.infer<typeof insertDeviceFingerprintSchema>;
+export type DeviceFingerprint = typeof deviceFingerprints.$inferSelect;
+
+export type InsertUserProfileMergeHistory = z.infer<typeof insertUserProfileMergeHistorySchema>;
+export type UserProfileMergeHistory = typeof userProfileMergeHistory.$inferSelect;
+
+export type InsertAnalyticsEvent = z.infer<typeof insertAnalyticsEventSchema>;
+export type AnalyticsEvent = typeof analyticsEvents.$inferSelect;
+
+export type InsertSessionBridge = z.infer<typeof insertSessionBridgeSchema>;
+export type SessionBridge = typeof sessionBridge.$inferSelect;
+
+export type InsertAnalyticsSyncStatus = z.infer<typeof insertAnalyticsSyncStatusSchema>;
+export type AnalyticsSyncStatus = typeof analyticsSyncStatus.$inferSelect;

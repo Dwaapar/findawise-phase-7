@@ -18,14 +18,75 @@ import {
   insertLeadCaptureSchema,
   insertLeadFormAssignmentSchema,
   insertLeadActivitySchema,
-  insertEmailCampaignSchema
+  insertEmailCampaignSchema,
+  insertGlobalUserProfileSchema,
+  insertDeviceFingerprintSchema,
+  insertAnalyticsEventSchema,
+  insertSessionBridgeSchema,
+  insertAnalyticsSyncStatusSchema
 } from "@shared/schema";
 import { z } from "zod";
+import { randomUUID } from "crypto";
 
 // Utility function to generate session ID
 function generateSessionId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
 }
+
+// Device fingerprinting utility
+function generateDeviceFingerprint(req: any): string {
+  const userAgent = req.headers['user-agent'] || '';
+  const acceptLanguage = req.headers['accept-language'] || '';
+  const acceptEncoding = req.headers['accept-encoding'] || '';
+  const ip = getClientIP(req);
+  
+  // Create a simple fingerprint based on available headers
+  const fingerprint = `${userAgent}|${acceptLanguage}|${acceptEncoding}|${ip}`;
+  return Buffer.from(fingerprint).toString('base64').substring(0, 64);
+}
+
+// Analytics event batching utility
+const eventBatchQueue: Map<string, any[]> = new Map();
+const BATCH_SIZE = 100;
+const BATCH_TIMEOUT = 5000; // 5 seconds
+
+async function addEventToBatch(sessionId: string, event: any): Promise<void> {
+  if (!eventBatchQueue.has(sessionId)) {
+    eventBatchQueue.set(sessionId, []);
+  }
+  
+  const batch = eventBatchQueue.get(sessionId)!;
+  batch.push(event);
+  
+  if (batch.length >= BATCH_SIZE) {
+    await processBatch(sessionId);
+  }
+}
+
+async function processBatch(sessionId: string): Promise<void> {
+  const batch = eventBatchQueue.get(sessionId);
+  if (!batch || batch.length === 0) return;
+  
+  try {
+    const batchId = randomUUID();
+    const eventsWithBatch = batch.map(event => ({ ...event, batchId }));
+    
+    await storage.trackAnalyticsEventBatch(eventsWithBatch);
+    eventBatchQueue.set(sessionId, []);
+    
+    // Process the batch
+    setTimeout(() => storage.processAnalyticsEvents(batchId), 1000);
+  } catch (error) {
+    console.error('Error processing event batch:', error);
+  }
+}
+
+// Auto-process batches every 5 seconds
+setInterval(async () => {
+  for (const [sessionId] of eventBatchQueue.entries()) {
+    await processBatch(sessionId);
+  }
+}, BATCH_TIMEOUT);
 
 // Utility function to get client IP
 function getClientIP(req: any): string {
@@ -1174,6 +1235,495 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const performance = await storage.getLeadFormPerformance();
       res.json({ performance });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ===========================================
+  // CROSS-DEVICE USER PROFILES & ANALYTICS SYNC API
+  // ===========================================
+
+  // Global User Profile Management
+  app.post('/api/analytics/user-profiles', async (req, res) => {
+    try {
+      const data = insertGlobalUserProfileSchema.parse(req.body);
+      const profile = await storage.createGlobalUserProfile(data);
+      res.json({ profile });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/user-profiles', async (req, res) => {
+    try {
+      const { limit = 100, offset = 0 } = req.query;
+      const profiles = await storage.getAllGlobalUserProfiles(
+        parseInt(limit as string), 
+        parseInt(offset as string)
+      );
+      res.json({ profiles });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/user-profiles/:id', async (req, res) => {
+    try {
+      const profile = await storage.getGlobalUserProfile(parseInt(req.params.id));
+      if (!profile) {
+        return res.status(404).json({ error: 'User profile not found' });
+      }
+      res.json({ profile });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put('/api/analytics/user-profiles/:id', async (req, res) => {
+    try {
+      const data = insertGlobalUserProfileSchema.partial().parse(req.body);
+      const profile = await storage.updateGlobalUserProfile(parseInt(req.params.id), data);
+      res.json({ profile });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/user-profiles/search/:query', async (req, res) => {
+    try {
+      const profiles = await storage.searchGlobalUserProfiles(req.params.query);
+      res.json({ profiles });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // User Identification and Cross-Device Recognition
+  app.post('/api/analytics/identify-user', async (req, res) => {
+    try {
+      const { sessionId, email, phone, deviceInfo } = req.body;
+      
+      if (!sessionId) {
+        return res.status(400).json({ error: 'Session ID is required' });
+      }
+
+      // Generate device fingerprint
+      const fingerprint = generateDeviceFingerprint(req);
+      
+      const user = await storage.identifyUser(sessionId, {
+        email,
+        phone,
+        fingerprint,
+        deviceInfo
+      });
+
+      res.json({ user, fingerprint });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/user-by-fingerprint/:fingerprint', async (req, res) => {
+    try {
+      const user = await storage.findUserByFingerprint(req.params.fingerprint);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      res.json({ user });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/user-by-email/:email', async (req, res) => {
+    try {
+      const { create } = req.query;
+      const user = await storage.findUserByEmail(req.params.email, create === 'true');
+      res.json({ user });
+    } catch (error) {
+      res.status(404).json({ error: error.message });
+    }
+  });
+
+  // Device Fingerprint Management
+  app.post('/api/analytics/device-fingerprints', async (req, res) => {
+    try {
+      const data = insertDeviceFingerprintSchema.parse(req.body);
+      const fingerprint = await storage.createDeviceFingerprint(data);
+      res.json({ fingerprint });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/device-fingerprints/:fingerprint', async (req, res) => {
+    try {
+      const fingerprint = await storage.getDeviceFingerprint(req.params.fingerprint);
+      if (!fingerprint) {
+        return res.status(404).json({ error: 'Device fingerprint not found' });
+      }
+      res.json({ fingerprint });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/device-fingerprints/user/:userId', async (req, res) => {
+    try {
+      const fingerprints = await storage.getDeviceFingerprintsByUser(parseInt(req.params.userId));
+      res.json({ fingerprints });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put('/api/analytics/device-fingerprints/:id', async (req, res) => {
+    try {
+      const data = insertDeviceFingerprintSchema.partial().parse(req.body);
+      const fingerprint = await storage.updateDeviceFingerprint(parseInt(req.params.id), data);
+      res.json({ fingerprint });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Analytics Event Tracking
+  app.post('/api/analytics/events', async (req, res) => {
+    try {
+      const data = insertAnalyticsEventSchema.parse(req.body);
+      
+      // Set server timestamp and processing details
+      data.serverTimestamp = new Date();
+      data.processingDelay = data.clientTimestamp ? 
+        Date.now() - new Date(data.clientTimestamp).getTime() : 0;
+      
+      // Add to batch queue for processing
+      await addEventToBatch(data.sessionId, data);
+      
+      res.json({ success: true, batchQueued: true });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/analytics/events/batch', async (req, res) => {
+    try {
+      const { events } = req.body;
+      
+      if (!Array.isArray(events) || events.length === 0) {
+        return res.status(400).json({ error: 'Events array is required' });
+      }
+
+      // Validate and process each event
+      const validatedEvents = events.map(event => {
+        const validated = insertAnalyticsEventSchema.parse(event);
+        validated.serverTimestamp = new Date();
+        validated.processingDelay = validated.clientTimestamp ? 
+          Date.now() - new Date(validated.clientTimestamp).getTime() : 0;
+        return validated;
+      });
+
+      // Process batch immediately
+      const batchId = randomUUID();
+      const eventsWithBatch = validatedEvents.map(event => ({ ...event, batchId }));
+      
+      const processedEvents = await storage.trackAnalyticsEventBatch(eventsWithBatch);
+      
+      // Process the batch
+      setTimeout(() => storage.processAnalyticsEvents(batchId), 1000);
+      
+      res.json({ 
+        success: true, 
+        processed: processedEvents.length,
+        batchId 
+      });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/events', async (req, res) => {
+    try {
+      const { 
+        sessionId, 
+        globalUserId, 
+        eventType, 
+        startDate, 
+        endDate, 
+        limit = 100, 
+        offset = 0 
+      } = req.query;
+
+      const filters = {
+        sessionId: sessionId as string,
+        globalUserId: globalUserId ? parseInt(globalUserId as string) : undefined,
+        eventType: eventType as string,
+        startDate: startDate ? new Date(startDate as string) : undefined,
+        endDate: endDate ? new Date(endDate as string) : undefined,
+        limit: parseInt(limit as string),
+        offset: parseInt(offset as string)
+      };
+
+      const events = await storage.getAnalyticsEvents(filters);
+      res.json({ events });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/events/user/:userId', async (req, res) => {
+    try {
+      const { limit = 100 } = req.query;
+      const events = await storage.getAnalyticsEventsByUser(
+        parseInt(req.params.userId), 
+        parseInt(limit as string)
+      );
+      res.json({ events });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/events/session/:sessionId', async (req, res) => {
+    try {
+      const events = await storage.getAnalyticsEventsBySession(req.params.sessionId);
+      res.json({ events });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Session Bridge Management
+  app.post('/api/analytics/session-bridge', async (req, res) => {
+    try {
+      const data = insertSessionBridgeSchema.parse(req.body);
+      const bridge = await storage.createSessionBridge(data);
+      res.json({ bridge });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/session-bridge/:sessionId', async (req, res) => {
+    try {
+      const bridge = await storage.getSessionBridge(req.params.sessionId);
+      if (!bridge) {
+        return res.status(404).json({ error: 'Session bridge not found' });
+      }
+      res.json({ bridge });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/analytics/link-session-to-user', async (req, res) => {
+    try {
+      const { sessionId, globalUserId, method, confidence } = req.body;
+      
+      if (!sessionId || !globalUserId || !method) {
+        return res.status(400).json({ error: 'sessionId, globalUserId, and method are required' });
+      }
+
+      await storage.linkSessionToGlobalUser(sessionId, globalUserId, method, confidence || 80);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Analytics Sync Status
+  app.post('/api/analytics/sync-status', async (req, res) => {
+    try {
+      const data = insertAnalyticsSyncStatusSchema.parse(req.body);
+      const status = await storage.createAnalyticsSyncStatus(data);
+      res.json({ status });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/sync-status/:sessionId', async (req, res) => {
+    try {
+      const status = await storage.getAnalyticsSyncStatus(req.params.sessionId);
+      if (!status) {
+        return res.status(404).json({ error: 'Sync status not found' });
+      }
+      res.json({ status });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put('/api/analytics/sync-status/:id', async (req, res) => {
+    try {
+      const data = insertAnalyticsSyncStatusSchema.partial().parse(req.body);
+      const status = await storage.updateAnalyticsSyncStatus(parseInt(req.params.id), data);
+      res.json({ status });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // User Profile Merge Management
+  app.post('/api/analytics/merge-user-profiles', async (req, res) => {
+    try {
+      const { masterProfileId, mergedProfileId, reason, confidence } = req.body;
+      
+      if (!masterProfileId || !mergedProfileId) {
+        return res.status(400).json({ error: 'masterProfileId and mergedProfileId are required' });
+      }
+
+      await storage.mergeUserProfiles(masterProfileId, mergedProfileId, reason || 'manual', confidence || 90);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/merge-history/:masterProfileId', async (req, res) => {
+    try {
+      const history = await storage.getUserProfileMergeHistory(parseInt(req.params.masterProfileId));
+      res.json({ history });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Comprehensive Analytics Dashboard API
+  app.get('/api/analytics/dashboard', async (req, res) => {
+    try {
+      const { 
+        startDate, 
+        endDate, 
+        globalUserId, 
+        deviceType, 
+        eventType 
+      } = req.query;
+
+      const filters = {
+        startDate: startDate ? new Date(startDate as string) : undefined,
+        endDate: endDate ? new Date(endDate as string) : undefined,
+        globalUserId: globalUserId ? parseInt(globalUserId as string) : undefined,
+        deviceType: deviceType as string,
+        eventType: eventType as string
+      };
+
+      const analytics = await storage.getComprehensiveAnalytics(filters);
+      res.json({ analytics });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/user-journey/:userId', async (req, res) => {
+    try {
+      const journey = await storage.getUserJourney(parseInt(req.params.userId));
+      res.json({ journey });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/cross-device-stats', async (req, res) => {
+    try {
+      const stats = await storage.getCrossDeviceStats();
+      res.json({ stats });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/engagement-metrics', async (req, res) => {
+    try {
+      const { globalUserId } = req.query;
+      const metrics = await storage.getEngagementMetrics(
+        globalUserId ? parseInt(globalUserId as string) : undefined
+      );
+      res.json({ metrics });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/conversion-funnel', async (req, res) => {
+    try {
+      const { funnelType = 'default' } = req.query;
+      const funnel = await storage.getConversionFunnelData(funnelType as string);
+      res.json({ funnel });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Export and Import Data API
+  app.get('/api/analytics/export/user/:userId', async (req, res) => {
+    try {
+      const userData = await storage.exportUserData(parseInt(req.params.userId));
+      res.json({ userData });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/export/analytics', async (req, res) => {
+    try {
+      const { 
+        startDate, 
+        endDate, 
+        globalUserId, 
+        deviceType, 
+        eventType 
+      } = req.query;
+
+      const filters = {
+        startDate: startDate ? new Date(startDate as string) : undefined,
+        endDate: endDate ? new Date(endDate as string) : undefined,
+        globalUserId: globalUserId ? parseInt(globalUserId as string) : undefined,
+        deviceType: deviceType as string,
+        eventType: eventType as string
+      };
+
+      const analyticsData = await storage.exportAnalyticsData(filters);
+      
+      // Set headers for CSV download
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', 'attachment; filename="analytics-export.json"');
+      res.json(analyticsData);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/analytics/import', async (req, res) => {
+    try {
+      const { data } = req.body;
+      
+      if (!data) {
+        return res.status(400).json({ error: 'Data is required for import' });
+      }
+
+      await storage.importAnalyticsData(data);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Real-time Analytics Sync Status
+  app.get('/api/analytics/sync-health', async (req, res) => {
+    try {
+      const queueSize = Array.from(eventBatchQueue.values()).reduce((sum, batch) => sum + batch.length, 0);
+      const activeQueues = eventBatchQueue.size;
+      
+      res.json({
+        status: 'healthy',
+        queueSize,
+        activeQueues,
+        batchSize: BATCH_SIZE,
+        batchTimeout: BATCH_TIMEOUT,
+        timestamp: new Date()
+      });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }

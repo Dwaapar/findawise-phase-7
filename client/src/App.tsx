@@ -10,6 +10,7 @@ import AffiliateDashboard from "@/pages/admin/affiliate-dashboard";
 import UserInsights from "@/pages/admin/user-insights";
 import { ExperimentsDashboard } from "@/pages/ExperimentsDashboard";
 import LeadsDashboard from "@/pages/LeadsDashboard";
+import CrossDeviceAnalyticsDashboard from "@/pages/admin/CrossDeviceAnalyticsDashboard";
 
 function Router() {
   return (
@@ -20,6 +21,7 @@ function Router() {
       <Route path="/admin/user-insights" component={UserInsights} />
       <Route path="/admin/experiments-dashboard" component={() => <ExperimentsDashboard />} />
       <Route path="/admin/leads-dashboard" component={LeadsDashboard} />
+      <Route path="/admin/cross-device-analytics" component={CrossDeviceAnalyticsDashboard} />
       <Route path="/page/:slug" component={DynamicPage} />
       <Route component={NotFound} />
     </Switch>

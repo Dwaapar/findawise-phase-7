@@ -21,7 +21,8 @@ import {
   Wand2,
   BarChart3,
   FlaskConical,
-  Mail
+  Mail,
+  Smartphone
 } from "lucide-react";
 
 const Dashboard = () => {
@@ -114,6 +115,14 @@ const Dashboard = () => {
                 <div className="flex items-center px-4 py-3 text-slate-700 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
                   <Mail className="w-5 h-5 mr-3" />
                   Lead Management
+                </div>
+              </Link>
+            </li>
+            <li>
+              <Link href="/admin/cross-device-analytics">
+                <div className="flex items-center px-4 py-3 text-slate-700 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
+                  <Smartphone className="w-5 h-5 mr-3" />
+                  Cross-Device Analytics
                 </div>
               </Link>
             </li>
