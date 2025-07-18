@@ -1,0 +1,67 @@
+I am attaching exported code from the previous Replit instance.
+All core modules
+You are continuing the Findawise Empire
+You MUST use and connect the existing codebase. This is a handoff from one Replit instance to another. Work as if you are a senior developer in a billion-dollar empire—no shortcuts, no duplications, only modular, clean execution.
+
+Do NOT compress or summarize code to save tokens. Output maximum quality and completeness.
+
+When complete, output a new README, list what is done/missing, and export all code.
+
+This must be robust, scalable, secure, and ready for full analytics & compliance.
+Your New Mission :
+You MUST:
+
+Build a Localization & Multi-Language Engine for the Findawise Empire:
+
+Add config-driven language and locale management (en, fr, es, hi, etc.)
+
+Auto-translate all static and dynamic content (pages, offers, forms, blog, emails, dashboards) using a free/open API or local engine for v1
+
+All modules must support multi-language rendering and user-selectable language switcher (with auto-detect and manual override)
+
+Fallback to default language and allow manual overrides in config
+
+Integrate multi-language support in analytics/events for global stats
+
+Add localized routing and SEO meta (hreflang, sitemap updates) for language-specific pages (subfolders or subdomains)
+
+README.md must be 100% English and fully document localization setup, translation logic, integration, SEO, troubleshooting, and export/import for next phase
+
+No skipped steps; this must be ready for real global scale
+
+What You Must Build:
+1. Config-Driven Language Engine
+
+Central config for supported languages/locales (en, fr, es, de, hi, etc.)
+
+Per-page, per-offer, per-form, per-content translation keys (modular, scalable)
+
+Language switcher UI—auto-detect browser/user locale, allow manual override
+
+2. Auto-Translation Layer
+
+Use free/open API (Google Translate API demo, LibreTranslate, HuggingFace, etc.) or local engine for v1
+
+Auto-generate translations for all static/dynamic content:
+
+Page titles, descriptions, offers, CTAs, forms, blog content, emails, dashboards
+
+Fallback to default (English) if translation missing; allow manual override via config
+
+3. Full Integration
+
+All major modules (generator, emotionMap, AffiliateOfferRenderer, LeadCaptureForm, blog, dashboards) must support multi-language rendering
+
+All analytics/events tagged with language/country for stats/optimization
+
+4. Localized Routing & SEO
+
+Optional: Add subfolder (/en/, /fr/, etc.) or subdomain logic for language-specific pages
+
+Update meta tags, hreflang, and sitemaps for Google/Bing localization/SEO
+
+5. README.md (MANDATORY, English Only)
+
+Full documentation for localization config, translation engine, multi-language setup, integration, SEO best practices, export/import, and troubleshooting
+
+Clear instructions for adding new locales, content, offers, and dashboard support

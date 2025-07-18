@@ -3,6 +3,7 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { LocalizationProvider } from "@/hooks/useLocalization";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import DynamicPage from "@/pages/[slug]";
@@ -11,6 +12,7 @@ import UserInsights from "@/pages/admin/user-insights";
 import { ExperimentsDashboard } from "@/pages/ExperimentsDashboard";
 import LeadsDashboard from "@/pages/LeadsDashboard";
 import CrossDeviceAnalyticsDashboard from "@/pages/admin/CrossDeviceAnalyticsDashboard";
+import LocalizationDashboard from "@/components/LocalizationDashboard";
 
 function Router() {
   return (
@@ -22,6 +24,7 @@ function Router() {
       <Route path="/admin/experiments-dashboard" component={() => <ExperimentsDashboard />} />
       <Route path="/admin/leads-dashboard" component={LeadsDashboard} />
       <Route path="/admin/cross-device-analytics" component={CrossDeviceAnalyticsDashboard} />
+      <Route path="/admin/localization" component={LocalizationDashboard} />
       <Route path="/page/:slug" component={DynamicPage} />
       <Route component={NotFound} />
     </Switch>
@@ -31,10 +34,12 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Router />
-      </TooltipProvider>
+      <LocalizationProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Router />
+        </TooltipProvider>
+      </LocalizationProvider>
     </QueryClientProvider>
   );
 }

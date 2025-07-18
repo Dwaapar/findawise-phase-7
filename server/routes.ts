@@ -23,10 +23,18 @@ import {
   insertDeviceFingerprintSchema,
   insertAnalyticsEventSchema,
   insertSessionBridgeSchema,
-  insertAnalyticsSyncStatusSchema
+  insertAnalyticsSyncStatusSchema,
+  insertLanguageSchema,
+  insertTranslationKeySchema,
+  insertTranslationSchema,
+  insertUserLanguagePreferenceSchema,
+  insertLocalizedContentAssignmentSchema,
+  insertLocalizationAnalyticsSchema
 } from "@shared/schema";
 import { z } from "zod";
 import { randomUUID } from "crypto";
+import { localizationStorage } from "./lib/localizationStorage";
+import { translationService } from "./lib/translationService";
 
 // Utility function to generate session ID
 function generateSessionId(): string {
@@ -1726,6 +1734,431 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ==========================================
+  // LOCALIZATION & MULTI-LANGUAGE ROUTES
+  // ==========================================
+
+  // Language Management Routes
+  app.get('/api/languages', async (req, res) => {
+    try {
+      const languages = await localizationStorage.getAllLanguages();
+      res.json({ success: true, data: languages });
+    } catch (error) {
+      console.error("Languages fetch error:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch languages" });
+    }
+  });
+
+  app.post('/api/languages', async (req, res) => {
+    try {
+      const data = insertLanguageSchema.parse(req.body);
+      const language = await localizationStorage.createLanguage(data);
+      res.json({ success: true, data: language });
+    } catch (error) {
+      console.error("Language creation error:", error);
+      res.status(400).json({ success: false, error: "Failed to create language" });
+    }
+  });
+
+  app.patch('/api/languages/:code', async (req, res) => {
+    try {
+      const { code } = req.params;
+      const updates = req.body;
+      const language = await localizationStorage.updateLanguage(code, updates);
+      if (!language) {
+        return res.status(404).json({ success: false, error: "Language not found" });
+      }
+      res.json({ success: true, data: language });
+    } catch (error) {
+      console.error("Language update error:", error);
+      res.status(400).json({ success: false, error: "Failed to update language" });
+    }
+  });
+
+  // Translation Routes
+  app.get('/api/translations/:languageCode', async (req, res) => {
+    try {
+      const { languageCode } = req.params;
+      const translations = await localizationStorage.getAllTranslations(languageCode);
+      
+      // Track content view analytics
+      const sessionId = req.session?.id || 'anonymous';
+      await localizationStorage.trackLocalizationEvent({
+        sessionId,
+        languageCode,
+        eventType: 'content_view',
+        contentType: 'translations',
+        metadata: { userAgent: req.get('User-Agent'), ip: req.ip }
+      });
+
+      res.json({ success: true, data: translations });
+    } catch (error) {
+      console.error("Translations fetch error:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch translations" });
+    }
+  });
+
+  app.get('/api/translations/:languageCode/:keyPath', async (req, res) => {
+    try {
+      const { languageCode, keyPath } = req.params;
+      const translation = await localizationStorage.getTranslationByKeyPath(keyPath, languageCode);
+      
+      if (!translation) {
+        // Track fallback usage
+        const sessionId = req.session?.id || 'anonymous';
+        await localizationStorage.trackLocalizationEvent({
+          sessionId,
+          languageCode,
+          eventType: 'translation_fallback',
+          keyPath,
+          fallbackUsed: true
+        });
+        
+        return res.status(404).json({ success: false, error: "Translation not found" });
+      }
+
+      res.json({ success: true, data: translation });
+    } catch (error) {
+      console.error("Translation fetch error:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch translation" });
+    }
+  });
+
+  // Translation Key Management
+  app.post('/api/translation-keys', async (req, res) => {
+    try {
+      const data = insertTranslationKeySchema.parse(req.body);
+      const key = await localizationStorage.createTranslationKey(data);
+      res.json({ success: true, data: key });
+    } catch (error) {
+      console.error("Translation key creation error:", error);
+      res.status(400).json({ success: false, error: "Failed to create translation key" });
+    }
+  });
+
+  app.get('/api/translation-keys', async (req, res) => {
+    try {
+      const { category } = req.query;
+      const keys = await localizationStorage.getAllTranslationKeys(category as string);
+      res.json({ success: true, data: keys });
+    } catch (error) {
+      console.error("Translation keys fetch error:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch translation keys" });
+    }
+  });
+
+  app.post('/api/translation-keys/batch', async (req, res) => {
+    try {
+      const { keys } = req.body;
+      if (!Array.isArray(keys)) {
+        return res.status(400).json({ success: false, error: "Keys must be an array" });
+      }
+
+      const validatedKeys = keys.map(key => insertTranslationKeySchema.parse(key));
+      const createdKeys = await localizationStorage.createTranslationKeysBatch(validatedKeys);
+      res.json({ success: true, data: createdKeys });
+    } catch (error) {
+      console.error("Batch translation keys creation error:", error);
+      res.status(400).json({ success: false, error: "Failed to create translation keys" });
+    }
+  });
+
+  // Auto-Translation Routes
+  app.post('/api/translations/auto-translate', async (req, res) => {
+    try {
+      const schema = z.object({
+        texts: z.array(z.string()),
+        targetLanguage: z.string(),
+        sourceLanguage: z.string().default('en'),
+        context: z.string().optional(),
+        category: z.string().optional()
+      });
+
+      const { texts, targetLanguage, sourceLanguage, context, category } = schema.parse(req.body);
+
+      const result = await translationService.translateBatch({
+        texts,
+        targetLanguage,
+        sourceLanguage,
+        context,
+        category
+      });
+
+      // Track auto-translation event
+      const sessionId = req.session?.id || 'anonymous';
+      await localizationStorage.trackLocalizationEvent({
+        sessionId,
+        languageCode: targetLanguage,
+        eventType: 'auto_translation',
+        contentType: category || 'text',
+        metadata: {
+          textsCount: texts.length,
+          sourceLanguage,
+          processingTime: result.processingTime,
+          errors: result.errors
+        }
+      });
+
+      res.json({ success: true, data: result });
+    } catch (error) {
+      console.error("Auto-translation error:", error);
+      res.status(500).json({ success: false, error: "Failed to auto-translate content" });
+    }
+  });
+
+  app.get('/api/translations/providers/status', async (req, res) => {
+    try {
+      const providers = await translationService.getAvailableProviders();
+      const cacheStats = translationService.getCacheStats();
+      res.json({ success: true, data: { providers, cacheStats } });
+    } catch (error) {
+      console.error("Translation providers status error:", error);
+      res.status(500).json({ success: false, error: "Failed to get providers status" });
+    }
+  });
+
+  // User Language Preferences
+  app.post('/api/user-language-preferences', async (req, res) => {
+    try {
+      const sessionId = req.session?.id || 'anonymous';
+      const browserLanguages = req.headers['accept-language']?.split(',').map(lang => lang.split(';')[0].trim()) || [];
+      
+      const data = insertUserLanguagePreferenceSchema.parse({
+        ...req.body,
+        sessionId,
+        browserLanguages,
+        detectedLanguage: browserLanguages[0]?.split('-')[0] || 'en'
+      });
+
+      const preference = await localizationStorage.upsertUserLanguagePreference(data);
+      
+      // Track language preference change
+      await localizationStorage.trackLocalizationEvent({
+        sessionId,
+        languageCode: data.preferredLanguage!,
+        eventType: 'language_preference_update',
+        metadata: { 
+          detectionMethod: data.detectionMethod,
+          isManualOverride: data.isManualOverride 
+        }
+      });
+
+      res.json({ success: true, data: preference });
+    } catch (error) {
+      console.error("User language preference error:", error);
+      res.status(400).json({ success: false, error: "Failed to update language preference" });
+    }
+  });
+
+  app.get('/api/user-language-preferences/:sessionId', async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const preference = await localizationStorage.getUserLanguagePreference(sessionId);
+      res.json({ success: true, data: preference });
+    } catch (error) {
+      console.error("User language preference fetch error:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch language preference" });
+    }
+  });
+
+  // Localized Content Routes
+  app.get('/api/content/:contentType/:contentId/:languageCode', async (req, res) => {
+    try {
+      const { contentType, contentId, languageCode } = req.params;
+      
+      const assignment = await localizationStorage.getLocalizedContentAssignment(
+        contentType, 
+        contentId, 
+        languageCode
+      );
+
+      if (!assignment) {
+        // Try fallback to default language
+        const defaultAssignment = await localizationStorage.getLocalizedContentAssignment(
+          contentType, 
+          contentId, 
+          'en'
+        );
+
+        if (!defaultAssignment) {
+          return res.status(404).json({ success: false, error: "Content not found" });
+        }
+
+        // Track fallback usage
+        const sessionId = req.session?.id || 'anonymous';
+        await localizationStorage.trackLocalizationEvent({
+          sessionId,
+          languageCode,
+          eventType: 'content_fallback',
+          contentType,
+          contentId,
+          fallbackUsed: true
+        });
+
+        return res.json({ success: true, data: defaultAssignment, fallbackUsed: true });
+      }
+
+      // Track content view
+      const sessionId = req.session?.id || 'anonymous';
+      await localizationStorage.trackLocalizationEvent({
+        sessionId,
+        languageCode,
+        eventType: 'content_view',
+        contentType,
+        contentId
+      });
+
+      res.json({ success: true, data: assignment });
+    } catch (error) {
+      console.error("Localized content fetch error:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch localized content" });
+    }
+  });
+
+  app.post('/api/localized-content-assignments', async (req, res) => {
+    try {
+      const data = insertLocalizedContentAssignmentSchema.parse(req.body);
+      const assignment = await localizationStorage.createLocalizedContentAssignment(data);
+      res.json({ success: true, data: assignment });
+    } catch (error) {
+      console.error("Localized content assignment error:", error);
+      res.status(400).json({ success: false, error: "Failed to create content assignment" });
+    }
+  });
+
+  // Analytics Routes
+  app.post('/api/analytics/localization', async (req, res) => {
+    try {
+      const sessionId = req.session?.id || 'anonymous';
+      const data = insertLocalizationAnalyticsSchema.parse({
+        ...req.body,
+        sessionId
+      });
+
+      const event = await localizationStorage.trackLocalizationEvent(data);
+      res.json({ success: true, data: event });
+    } catch (error) {
+      console.error("Localization analytics error:", error);
+      res.status(400).json({ success: false, error: "Failed to track localization event" });
+    }
+  });
+
+  app.get('/api/analytics/localization', async (req, res) => {
+    try {
+      const { languageCode, eventType, startDate, endDate } = req.query;
+      
+      const start = startDate ? new Date(startDate as string) : undefined;
+      const end = endDate ? new Date(endDate as string) : undefined;
+      
+      const analytics = await localizationStorage.getLocalizationAnalytics(
+        languageCode as string,
+        eventType as string,
+        start,
+        end
+      );
+
+      res.json({ success: true, data: analytics });
+    } catch (error) {
+      console.error("Localization analytics fetch error:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch localization analytics" });
+    }
+  });
+
+  app.get('/api/analytics/language-usage', async (req, res) => {
+    try {
+      const stats = await localizationStorage.getLanguageUsageStats();
+      res.json({ success: true, data: stats });
+    } catch (error) {
+      console.error("Language usage stats error:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch language usage stats" });
+    }
+  });
+
+  app.get('/api/analytics/translation-completeness/:languageCode', async (req, res) => {
+    try {
+      const { languageCode } = req.params;
+      const completeness = await localizationStorage.getTranslationCompleteness(languageCode);
+      res.json({ success: true, data: completeness });
+    } catch (error) {
+      console.error("Translation completeness error:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch translation completeness" });
+    }
+  });
+
+  // Bulk Translation Management
+  app.post('/api/translations/bulk-translate/:languageCode', async (req, res) => {
+    try {
+      const { languageCode } = req.params;
+      const { limit = 50 } = req.query;
+      
+      // Get untranslated keys
+      const untranslatedKeys = await localizationStorage.getUntranslatedKeys(languageCode, Number(limit));
+      
+      if (untranslatedKeys.length === 0) {
+        return res.json({ success: true, message: "No untranslated keys found", data: { translated: 0 } });
+      }
+
+      // Auto-translate them
+      const texts = untranslatedKeys.map(key => key.defaultValue);
+      const translationResult = await translationService.translateBatch({
+        texts,
+        targetLanguage: languageCode,
+        sourceLanguage: 'en'
+      });
+
+      // Save translations
+      const translationsToSave = untranslatedKeys.map((key, index) => ({
+        keyId: key.id,
+        languageCode,
+        translatedValue: translationResult.translations[index]?.translatedText || key.defaultValue,
+        isAutoTranslated: true,
+        quality: Math.round(translationResult.translations[index]?.confidence * 100) || 50,
+        metadata: {
+          provider: translationResult.translations[index]?.provider,
+          confidence: translationResult.translations[index]?.confidence
+        }
+      }));
+
+      await localizationStorage.createTranslationsBatch(translationsToSave);
+
+      // Track bulk translation event
+      const sessionId = req.session?.id || 'anonymous';
+      await localizationStorage.trackLocalizationEvent({
+        sessionId,
+        languageCode,
+        eventType: 'bulk_translation',
+        metadata: {
+          keysTranslated: untranslatedKeys.length,
+          processingTime: translationResult.processingTime,
+          errors: translationResult.errors
+        }
+      });
+
+      res.json({ 
+        success: true, 
+        data: { 
+          translated: untranslatedKeys.length,
+          errors: translationResult.errors,
+          processingTime: translationResult.processingTime
+        } 
+      });
+    } catch (error) {
+      console.error("Bulk translation error:", error);
+      res.status(500).json({ success: false, error: "Failed to perform bulk translation" });
+    }
+  });
+
+  // Initialize default languages on startup
+  app.post('/api/localization/initialize', async (req, res) => {
+    try {
+      await localizationStorage.initializeDefaultLanguages();
+      res.json({ success: true, message: "Default languages initialized" });
+    } catch (error) {
+      console.error("Localization initialization error:", error);
+      res.status(500).json({ success: false, error: "Failed to initialize localization" });
     }
   });
 

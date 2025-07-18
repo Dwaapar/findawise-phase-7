@@ -6,6 +6,8 @@ import { Link, useLocation } from "wouter";
 import { emotionMap } from "@/config/emotionMap";
 import { PagesConfig } from "@/types/config";
 import AnalyticsDashboard from "./AnalyticsDashboard";
+import { useLocalization } from "@/hooks/useLocalization";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { 
   FileText, 
   Settings, 
@@ -22,7 +24,8 @@ import {
   BarChart3,
   FlaskConical,
   Mail,
-  Smartphone
+  Smartphone,
+  Globe
 } from "lucide-react";
 
 const Dashboard = () => {
@@ -30,6 +33,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [currentView, setCurrentView] = useState('overview');
   const [location, navigate] = useLocation();
+  const { translate, isRTL, textDirection } = useLocalization();
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -123,6 +127,14 @@ const Dashboard = () => {
                 <div className="flex items-center px-4 py-3 text-slate-700 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
                   <Smartphone className="w-5 h-5 mr-3" />
                   Cross-Device Analytics
+                </div>
+              </Link>
+            </li>
+            <li>
+              <Link href="/admin/localization">
+                <div className="flex items-center px-4 py-3 text-slate-700 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
+                  <Globe className="w-5 h-5 mr-3" />
+                  {translate ? translate('nav.localization', {}, 'Localization') : 'Localization'}
                 </div>
               </Link>
             </li>
